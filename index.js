@@ -69,13 +69,16 @@ function render() {
         if (!name) continue;
         let checkbox = row.querySelector('.cbd-check');
         if (!checkbox) {
-            checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
+            // Native checkbox clicks are rolled back when selection mode cancels
+            // the click to keep ST from opening the chat. Use a controlled button.
+            checkbox = document.createElement('button');
+            checkbox.type = 'button';
+            checkbox.setAttribute('role', 'checkbox');
             checkbox.className = 'cbd-check';
             row.prepend(checkbox);
         }
         checkbox.setAttribute('aria-label', `${name} 선택`);
-        checkbox.checked = selected.has(name);
+        checkbox.setAttribute('aria-checked', String(selected.has(name)));
         checkbox.disabled = busy;
         row.classList.toggle('cbd-selected', mode && selected.has(name));
     }
@@ -253,8 +256,6 @@ function onClick(event) {
         event.preventDefault(); event.stopImmediatePropagation();
         const name = rowName(row);
         if (name) { selected.has(name) ? selected.delete(name) : selected.add(name); statusText = ''; render(); }
-        // preventDefault reverts native checkbox toggling after this handler finishes.
-        queueMicrotask(render);
     }
 }
 function onKey(event) {

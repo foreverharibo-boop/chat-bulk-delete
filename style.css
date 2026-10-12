@@ -5,7 +5,13 @@
 #cbd-toolbar .cbd-delete { font-weight:600; }
 .cbd-status { font-size:12px; opacity:.8; overflow-wrap:anywhere; }
 #select_chat_div .cbd-check { display:none; }
-#select_chat_popup.cbd-selection-mode #select_chat_div .cbd-check { display:block; flex:0 0 auto; width:19px; height:19px; margin:10px 2px 0 4px; accent-color:var(--SmartThemeQuoteColor, #888); cursor:pointer; }
+#select_chat_popup.cbd-selection-mode #select_chat_div .cbd-check { appearance:none; -webkit-appearance:none; display:flex; align-items:center; justify-content:center; flex:0 0 19px; box-sizing:border-box; width:19px; min-width:19px; height:19px; min-height:19px; margin:10px 2px 0 4px; padding:0; border:1px solid var(--SmartThemeBodyColor, currentColor); border-radius:4px; color:var(--SmartThemeBodyColor, currentColor); background:var(--SmartThemeBlurTintColor, transparent); box-shadow:none; text-shadow:none; cursor:pointer; }
+#select_chat_popup #select_chat_div .cbd-check::before { content:none; }
+#select_chat_popup #select_chat_div .cbd-check::after { content:""; display:block; box-sizing:border-box; width:6px; height:10px; border:solid currentColor; border-width:0 2px 2px 0; transform:translateY(-1px) rotate(45deg); opacity:0; }
+#select_chat_popup #select_chat_div .cbd-check[aria-checked="true"]::after { opacity:1; }
+#select_chat_popup #select_chat_div .cbd-check[aria-checked="true"] { border-width:2px; }
+#select_chat_popup #select_chat_div .cbd-check:focus-visible { outline:2px solid var(--SmartThemeBodyColor, currentColor); outline-offset:2px; }
+#select_chat_popup #select_chat_div .cbd-check:disabled { opacity:.45; cursor:default; }
 #select_chat_popup.cbd-selection-mode #select_chat_div .select_chat_block_wrapper { flex-wrap:nowrap; gap:6px; align-items:flex-start; }
 #select_chat_popup.cbd-selection-mode #select_chat_div .select_chat_block { flex:1; min-width:0; cursor:pointer; }
 #select_chat_popup.cbd-selection-mode #select_chat_div .select_chat_actions,
