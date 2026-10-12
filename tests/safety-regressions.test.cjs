@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const fixtureCode = fs.readFileSync('tests/delete-scope.test.cjs', 'utf8').split('(async()=>{')[0];
-const fixtures = { require, console, queueMicrotask, TextEncoder, Uint8Array, btoa, Buffer };
+const fixtures = { require, console, queueMicrotask, setTimeout, TextEncoder, Uint8Array, btoa, Buffer };
 vm.createContext(fixtures);
 vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
 (async () => {
@@ -91,6 +91,19 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
         await vault.setLock(t, '전여친1', true);
         const report = await deleteSelected(['전여친1'], t, f.runtime.scopeApi, () => {}, () => false);
         assert.equal(report.failed.length, 1); assert.equal(f.calls.length, 0);
+    });
+    await check('duplicate scan only reads current-scope chats; never saves, archives, selects or deletes', async () => {
+        const f = fixtures.makeFixture(false);
+        let saves = 0;
+        f.ctx.saveChat = async () => { saves++; };
+        const requests = [], fetch = f.runtime.fetch;
+        f.runtime.fetch = async (url, options) => { requests.push({url,body:options?.body?JSON.parse(options.body):null}); return fetch(url,options); };
+        await vm.runInContext('runDuplicateScan()', f.runtime);
+        assert.equal(saves, 0); assert.equal(f.calls.length, 0); assert.equal(f.archiveFiles.size, 0);
+        assert.ok(requests.every(r=>r.url==='/api/chats/search'||r.url==='/api/chats/export'));
+        assert.ok(requests.every(r=>r.body.avatar_url==='current.png'));
+        assert.equal(vm.runInContext('duplicateGroups.size', f.runtime), 4);
+        assert.equal(vm.runInContext('selected.size', f.runtime), 0);
     });
     if (checks.length) process.exitCode = 1;
 })().catch(error => { console.error(error); process.exitCode = 1; });

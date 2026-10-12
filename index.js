@@ -6,6 +6,8 @@ import { deleteSelected } from './batch.js';
 import { ChatVault, scopeKey, parseChat } from './vault.js';
 import { makeZip, backupNames } from './zip.js';
 import { arrange, fileSize } from './view.js';
+import * as STLib from '../../../../lib.js';
+import { findDuplicateChats } from './duplicates.js';
 
 const selected = new Set();
 let mode = false;
@@ -20,6 +22,21 @@ let statusText = '';
 let vault;
 let filterControls;
 let vaultLoading;
+let duplicateScope = null;
+let duplicateGroups = new Map();
+let duplicateRevision = 0;
+function clearDuplicates() {
+    const hadResults = duplicateScope !== null;
+    duplicateRevision++;
+    duplicateScope = null;
+    duplicateGroups.clear();
+    const filter = filterControls?.querySelector('[name="filter"]');
+    if (filter?.value === 'duplicates') filter.value = 'all';
+    if (hadResults) statusText = '중복 표시 해제 · 필요하면 다시 중복 확인을 눌러줘.';
+}
+function duplicateInfo(t, name) {
+    return duplicateScope && t && scopeKey(t) === duplicateScope ? duplicateGroups.get(name) : null;
+}
 const getVault = () => vault ||= new ChatVault({ post, getContext });
 const locked = (t, name) => Boolean(t && getVault().isLocked(t, name));
 function currentTarget() { try { return captureTarget(); } catch { return null; } }
@@ -122,6 +139,21 @@ function render() {
         lock.setAttribute('aria-pressed', String(isLocked));
         lock.disabled = busy || !getVault().ready;
         row.classList.toggle('cbd-locked', isLocked);
+        const duplicate = duplicateInfo(scope, name);
+        let badge = row.querySelector('.cbd-duplicate-badge');
+        row.classList.toggle('cbd-duplicate-row', Boolean(duplicate));
+        if (duplicate) {
+            if (!badge) {
+                badge = document.createElement('span'); badge.className = 'cbd-duplicate-badge';
+                row.querySelector('.select_chat_block').append(badge);
+            }
+            row.style.setProperty('--cbd-duplicate-color', `hsl(${(duplicate.group * 137.508 + 195) % 360} 65% 50%)`);
+            badge.textContent = `같은 내용 ${duplicate.group} · ${duplicate.count}개`;
+            badge.title = '마지막 중복 검사 기준 · 파일 이름/방 설정/메시지 시각 제외 · 삭제 전 내용 확인';
+        } else {
+            badge?.remove();
+            row.style?.removeProperty('--cbd-duplicate-color');
+        }
     }
     applyView();
 }
@@ -130,6 +162,7 @@ function applyView() {
     const scope = target || currentTarget();
     const items = rows().map((row, index) => ({ row, index, name: rowName(row) || '',
         locked: locked(scope, rowName(row)),
+        duplicate: Boolean(duplicateInfo(scope, rowName(row))),
         count: Number((row.querySelector('.chat_messages_num')?.textContent || '').match(/[\d,]+/)?.[0]?.replace(/,/g, '') || 0),
         size: fileSize(row.querySelector('.chat_file_size')?.textContent || ''),
     }));
@@ -217,6 +250,7 @@ const api = {
         catch (error) { notice('warning', `원본 삭제 후 상태 기록 실패: ${error.message} 휴지통의 확인 필요 항목에서 복원할 수 있어.`); }
     },
     async afterDelete(t, name) {
+        clearDuplicates();
         if (name === t.active) {
             if (!sameTarget(t) || getContext().chatId !== t.active) {
                 throw new Error('삭제 중 채팅이 바뀌어 현재 화면을 갱신하지 않았어.');
@@ -352,7 +386,7 @@ async function withBusy(work) {
     busy = true; stopRequested = false;
     document.body.classList.add('cbd-operation-running'); render();
     try { return await work(); }
-    catch (error) { notice('error', error.message); }
+    catch (error) { statusText = error.message; notice('error', error.message); }
     finally {
         busy = false; stopRequested = false;
         document.body.classList.remove('cbd-operation-running'); render();
@@ -377,6 +411,42 @@ async function runBackup() {
         downloadBlob(makeZip(files), `채팅-개별백업-${Date.now()}.zip`);
         statusText = `${files.length}개 개별 JSONL 파일을 담은 ZIP 다운로드 요청 완료`;
         notice('success', statusText);
+    });
+}
+async function runDuplicateScan() {
+    const snapshot = captureTarget();
+    await withBusy(async () => {
+        if (api.isGenerating()) throw new Error('답변 생성이 끝난 다음 중복 확인을 눌러줘.');
+        if (typeof STLib.sha256 !== 'function') throw new Error('이 실리 버전에서는 중복 확인에 필요한 기능을 찾을 수 없어.');
+        clearDuplicates(); selected.clear();
+        const revision = duplicateRevision;
+        statusText = '중복 확인 · 채팅 목록을 읽는 중…'; render();
+        const assertContext = () => {
+            if (!sameTarget(snapshot) || api.currentChat() !== snapshot.active || api.isGenerating() || revision !== duplicateRevision) {
+                throw new Error('채팅 상태가 바뀌어서 검사를 중단했어. 다시 확인해줘.');
+            }
+        };
+        const names = await api.listNames(snapshot);
+        assertContext();
+        const result = await findDuplicateChats(names, async name => {
+            assertContext();
+            const raw = await getVault().exportChat(snapshot, name);
+            assertContext(); verifyOpenChat(raw, snapshot, name);
+            return raw;
+        }, {
+            hash: STLib.sha256, shouldStop: () => stopRequested, assertContext,
+            progress: (done, total) => { statusText = `중복 확인 ${done} / ${total}`; render(); },
+        });
+        if (result.stopped) { statusText = '중복 확인 중단 · 표시를 적용하지 않았어.'; return; }
+        assertContext();
+        duplicateScope = scopeKey(snapshot);
+        result.groups.forEach((names, index) => names.forEach(name => duplicateGroups.set(name, { group: index + 1, count: names.length })));
+        statusText = `같은 내용 ${result.groups.length}묶음 · ${duplicateGroups.size}개 방`
+            + (result.failed.length ? ` · 확인 실패 ${result.failed.length}건` : ' · 검사 완료');
+        notice(result.failed.length ? 'warning' : 'success', statusText);
+        if (result.failed.length) {
+            notice('warning', '읽지 못했거나 검사 중 바뀐 방은 표시에서 제외했어. 잠시 후 다시 확인해줘.');
+        }
     });
 }
 async function toggleLock(name) {
@@ -450,6 +520,7 @@ function onClick(event) {
         else if (action === 'delete') void runDelete().catch(error => notice('error', error.message));
         else if (action === 'backup') void runBackup().catch(error => notice('error', error.message));
         else if (action === 'trash') void showTrash().catch(error => notice('error', error.message));
+        else if (action === 'duplicates') void runDuplicateScan().catch(error => notice('error', error.message));
         return;
     }
     const row = element.closest('#select_chat_div .select_chat_block_wrapper');
@@ -492,7 +563,8 @@ function initialize() {
     toolbar.id = 'cbd-toolbar';
     toolbar.append(button('선택', 'toggle'), button('현재 목록 전체 선택', 'all'),
         button('선택 해제', 'clear'), button('휴지통으로 (0)', 'delete', 'cbd-delete'),
-        button('선택 ZIP 백업', 'backup'), button('휴지통 / 복원', 'trash'), button('중단', 'stop'));
+        button('선택 ZIP 백업', 'backup'), button('휴지통 / 복원', 'trash'),
+        button('중복 확인', 'duplicates'), button('중단', 'stop'));
     const status = document.createElement('span');
     status.className = 'cbd-status';
     status.setAttribute('role', 'status');
@@ -502,7 +574,7 @@ function initialize() {
     filterControls = document.createElement('div'); filterControls.id = 'cbd-filters';
     for (const [name, label, choices] of [
         ['order', '정렬', [['newest', '최신순'], ['oldest', '오래된순'], ['name-asc', '오름차순 (이름)'], ['name-desc', '내림차순 (이름)'], ['size', '용량 큰순'], ['messages', '메시지 많은순']]],
-        ['filter', '필터', [['all', '전체'], ['locked', '잠긴 방'], ['unlocked', '안 잠긴 방']]],
+        ['filter', '필터', [['all', '전체'], ['locked', '잠긴 방'], ['unlocked', '안 잠긴 방'], ['duplicates', '같은 내용만']]],
     ]) {
         const wrapper = document.createElement('label'); wrapper.textContent = label;
         const select = document.createElement('select'); select.name = name; select.setAttribute('aria-label', label);
@@ -523,8 +595,12 @@ function initialize() {
         if (!busy && getComputedStyle(shadow).display === 'none') reset();
     }).observe(shadow, { attributes: true, attributeFilter: ['style', 'class'] });
     const ctx = getContext();
-    ctx.eventSource.on(ctx.eventTypes.CHAT_CHANGED, () => { if (!busy) reset(); });
+    ctx.eventSource.on(ctx.eventTypes.CHAT_CHANGED, () => { clearDuplicates(); if (!busy) reset(); });
+    for (const key of ['MESSAGE_SENT', 'MESSAGE_RECEIVED', 'MESSAGE_EDITED', 'MESSAGE_DELETED', 'MESSAGE_SWIPED', 'CHAT_DELETED', 'GROUP_CHAT_DELETED']) {
+        if (ctx.eventTypes[key]) ctx.eventSource.on(ctx.eventTypes[key], () => { clearDuplicates(); render(); });
+    }
     if (ctx.eventTypes.CHAT_RENAMED) ctx.eventSource.on(ctx.eventTypes.CHAT_RENAMED, async event => {
+        clearDuplicates();
         const t = event.groupId ? { kind: 'group', id: event.groupId } : { kind: 'character', avatar: event.avatarId };
         try {
             const response = await post('/api/files/sanitize-filename', { fileName: event.newFileName });

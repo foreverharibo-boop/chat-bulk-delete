@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const vaultSource = fs.readFileSync(fs.existsSync('vault.js') ? 'vault.js' : 'chat-bulk-delete/vault.js', 'utf8').replace(/^export /gm, '');
-const source = vaultSource + '\n' + fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js', 'utf8').replace(/^import .*;\n/gm, '');
+const duplicatesSource = fs.readFileSync(fs.existsSync('duplicates.js') ? 'duplicates.js' : 'chat-bulk-delete/duplicates.js', 'utf8').replace(/^export /gm, '');
+const source = vaultSource + '\n' + duplicatesSource + '\n' + fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js', 'utf8').replace(/^import .*;\n/gm, '');
 const names = ['현재 방', '전여친1', '김홍진 - imported', '전여친1 - Branch #1'];
 function fixture(isGroup) {
     const stores = {
@@ -27,8 +28,9 @@ function fixture(isGroup) {
     };
     let switchAfterList = false;
     const runtime = {
-        console, Set, Element:class{}, queueMicrotask, TextEncoder, Uint8Array, btoa, crypto:require('node:crypto').webcrypto,
-        document:{readyState:'loading',addEventListener(){}},getContext:()=>ctx,
+        console, Set, Element:class{}, queueMicrotask, setTimeout, TextEncoder, Uint8Array, btoa, crypto:require('node:crypto').webcrypto,
+        STLib:{sha256:text=>require('node:crypto').createHash('sha256').update(text).digest('hex')},
+        document:{readyState:'loading',addEventListener(){},body:{classList:{add(){},remove(){}}}},getContext:()=>ctx,
         ST:{isGenerating:()=>false,displayPastChats:async()=>{},replaceCurrentChat:async()=>{ctx.characters[0].chat=[...stores['char:current.png']][0]||'new';}},
         Group:{editGroup:async()=>{},openGroupChat:async(id,n)=>{ctx.groups.find(g=>g.id===id).chat_id=n;},createNewGroupChat:async(id)=>{const g=ctx.groups.find(g=>g.id===id);g.chat_id='new';g.chats.push('new');}},
         fetch:async(url, opts)=>{

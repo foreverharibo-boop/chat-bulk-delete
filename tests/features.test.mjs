@@ -91,6 +91,7 @@ assert.equal(arrange(items,{order:'messages'})[0].name,'방 10');
 assert.deepEqual(arrange(items,{filter:'locked'}).map(x=>x.name),['가나다']);
 assert.deepEqual(arrange(items,{filter:'empty'}).map(x=>x.name),['가나다']);
 assert.equal(arrange(items,{name:'방',filter:'unlocked'}).length,2);
+assert.deepEqual(arrange(items.map((item,i)=>({...item,duplicate:i<2})),{filter:'duplicates'}).map(x=>x.name),['방 10','가나다']);
 console.log('PASS: Korean/numeric name ordering, reverse names, date/size/count sorts and combined filters');
 const names=backupNames(['같은/이름','같은\\이름','한글 😊','CON','../경로','A','a']);
 assert.equal(new Set(names.map(x=>x.toLowerCase())).size,names.length);

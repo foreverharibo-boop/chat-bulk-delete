@@ -37,3 +37,5 @@
 .cbd-trash-row p { white-space:pre-wrap; overflow-wrap:anywhere; margin:0 0 6px; }
 .cbd-trash-row .cbd-button { display:inline-block; width:auto; margin:0 6px 0 0; }
 .cbd-trash-row button:disabled { opacity:.45; }
+#select_chat_div .cbd-duplicate-row .select_chat_block { box-shadow:inset 3px 0 0 var(--cbd-duplicate-color); }
+#select_chat_div .cbd-duplicate-badge { display:block; flex-basis:100%; width:100%; margin:4px 0 0; padding:3px 7px; border-inline-start:3px solid var(--cbd-duplicate-color); border-radius:3px; font-size:11px; line-height:1.4; color:var(--SmartThemeBodyColor); background:color-mix(in srgb, var(--cbd-duplicate-color) 15%, transparent); }

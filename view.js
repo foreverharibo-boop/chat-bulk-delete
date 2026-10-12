@@ -7,7 +7,7 @@ export function arrange(items, { order = 'newest', filter = 'all', name = '' } =
     const query = name.normalize('NFC').toLocaleLowerCase('ko');
     const filtered = items.filter(x => x.name.normalize('NFC').toLocaleLowerCase('ko').includes(query)
         && (filter === 'all' || (filter === 'locked' && x.locked) || (filter === 'unlocked' && !x.locked)
-            || (filter === 'empty' && x.count === 0)));
+            || (filter === 'empty' && x.count === 0) || (filter === 'duplicates' && x.duplicate)));
     return filtered.sort((a, b) => {
         if (order === 'name-asc') return collator.compare(a.name, b.name) || a.index - b.index;
         if (order === 'name-desc') return collator.compare(b.name, a.name) || a.index - b.index;
