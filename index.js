@@ -42,6 +42,14 @@ function sameTarget(t) {
 }
 function rowName(row) { return row.querySelector('.select_chat_block')?.getAttribute('file_name'); }
 function rows() { return [...list.querySelectorAll('.select_chat_block_wrapper')]; }
+function onListChanged() {
+    if (!busy) {
+        const hadSelection = selected.size > 0;
+        selected.clear();
+        if (hadSelection) statusText = '목록이 바뀌어서 선택을 해제했어. 다시 선택해줘.';
+    }
+    render();
+}
 function reset() {
     if (busy) return;
     mode = false;
@@ -110,8 +118,14 @@ const api = {
         if (t.kind === 'group') {
             const group = getContext().groups.find(g => String(g.id) === String(t.id));
             if (!group?.chats.includes(name)) throw new Error('그룹 채팅을 찾을 수 없어.');
+            // Group chat files share a global directory, unlike character chats.
+            if (getContext().groups.some(g => String(g.id) !== String(t.id)
+                && (g.chats?.includes(name) || g.chat_id === name))) {
+                throw new Error('다른 그룹에서도 사용하는 채팅 파일이라 삭제하지 않았어.');
+            }
             await post('/api/chats/group/delete', { id: name });
-            group.chats.splice(group.chats.indexOf(name), 1);
+            const index = group.chats.indexOf(name);
+            if (index !== -1) group.chats.splice(index, 1);
         } else {
             // Search returns the exact chat name without the file extension.
             await post('/api/chats/delete', { avatar_url: t.avatar, chatfile: `${name}.jsonl` });
@@ -134,9 +148,9 @@ const api = {
         const event = t.kind === 'group' ? ctx.eventTypes.GROUP_CHAT_DELETED : ctx.eventTypes.CHAT_DELETED;
         if (event) await ctx.eventSource.emit(event, name);
     },
-    async finish(t) {
+    async finish(t, deleted) {
         if (t.kind === 'group') await Group.editGroup(t.id, true, false);
-        if (sameTarget(t) && getContext().chatId === t.active) {
+        if (deleted.includes(t.active) && sameTarget(t) && getContext().chatId === t.active) {
             const remaining = await api.listNames(t);
             if (!remaining.includes(t.active)) {
                 if (t.kind === 'character') await ST.replaceCurrentChat();
@@ -174,6 +188,10 @@ async function runDelete() {
         notice('error', '이 실리태번 버전에서는 필요한 채팅 기능을 찾을 수 없어.'); return;
     }
     const names = [...selected];
+    const visibleNames = new Set(rows().map(rowName));
+    if (names.some(name => !visibleNames.has(name))) {
+        onListChanged(); notice('warning', '현재 목록에 없는 선택이 있어서 해제했어. 다시 선택해줘.'); return;
+    }
     const snapshot = { ...target };
     confirming = true;
     let result;
@@ -183,7 +201,8 @@ async function runDelete() {
         });
     } finally { confirming = false; }
     if (result !== POPUP_RESULT.AFFIRMATIVE) return;
-    if (!sameTarget(snapshot) || api.currentChat() !== snapshot.active || api.isGenerating()) {
+    if (!sameTarget(snapshot) || api.currentChat() !== snapshot.active || api.isGenerating()
+        || names.length !== selected.size || names.some(name => !selected.has(name))) {
         reset(); notice('warning', '확인하는 동안 채팅 상태가 바뀌었어. 다시 선택해줘.'); return;
     }
     busy = true;
@@ -285,7 +304,8 @@ function initialize() {
     list.before(toolbar);
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKey, true);
-    new MutationObserver(render).observe(list, { childList: true });
+    new MutationObserver(onListChanged).observe(list, { childList: true });
+    document.getElementById('select_chat_search')?.addEventListener('input', onListChanged);
     const shadow = document.getElementById('shadow_select_chat_popup');
     if (shadow) new MutationObserver(() => {
         if (!busy && getComputedStyle(shadow).display === 'none') reset();

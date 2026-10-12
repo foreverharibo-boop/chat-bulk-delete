@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "담은",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "auto_update": true,
   "homePage": "https://github.com/foreverharibo-boop/chat-bulk-delete"
 }

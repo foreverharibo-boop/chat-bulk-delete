@@ -5,16 +5,17 @@ export async function deleteSelected(names, target, api, progress, shouldStop) {
     const warnings = [];
     let stopped = false;
     const assertTarget = () => {
-        if (!api.sameTarget(target) || api.isGenerating()) {
+        if (!api.sameTarget(target) || api.isGenerating() || api.currentChat() !== target.active) {
             throw new Error('채팅 대상이 바뀌었거나 답변이 생성 중이라 삭제를 중단했어.');
         }
     };
     assertTarget();
+    const unique = [...new Set(names)];
     // Flush ST's debounced save before deleting the open chat.
-    await api.saveChat();
+    // An unselected open chat must not be saved by this operation.
+    if (unique.includes(target.active)) await api.saveChat();
     assertTarget();
     const available = new Set(await api.listNames(target));
-    const unique = [...new Set(names)];
     // Delete the currently displayed chat last to avoid saving it back to disk.
     const ordered = unique.filter(x => x !== target.active);
     if (unique.includes(target.active)) ordered.push(target.active);
