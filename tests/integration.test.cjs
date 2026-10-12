@@ -1,25 +1,30 @@
 const vm = require('vm');
 const fs = require('fs');
 const assert = require('assert/strict');
-const src = fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js','utf8').replace(/^import .*;\n/gm,'');
+const vaultSource = fs.readFileSync(fs.existsSync('vault.js') ? 'vault.js' : 'chat-bulk-delete/vault.js','utf8').replace(/^export /gm,'');
+const src = vaultSource+'\n'+fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js','utf8').replace(/^import .*;\n/gm,'');
 function setup(groupMode=false) {
+ const archiveFiles=new Map(); const raw=JSON.stringify({chat_metadata:{}})+'\n'+JSON.stringify({mes:'kept'});
  const disk=new Set(['active','a','b']); const requests=[]; const events=[];
  const ctx={characterId:0,groupId:groupMode?'g':null,characters:[{avatar:'fixture.png',chat:'active'}],
   groups:[{id:'g',chat_id:'active',chats:['active','a','b']}],
   get chatId(){return this.groupId?this.groups[0].chat_id:this.characters[this.characterId].chat;},
-  getRequestHeaders:()=>({'X-CSRF-Token':'fixture'}),saveChat:async()=>requests.push('flush-save'),
+  chat:[{mes:'kept'}],getRequestHeaders:()=>({'X-CSRF-Token':'fixture'}),saveChat:async()=>requests.push('flush-save'),
   eventTypes:{CHAT_DELETED:'deleted',GROUP_CHAT_DELETED:'group-deleted'},eventSource:{emit:async(e,n)=>events.push([e,n])}};
  let failName=null;
- const runtime={console,Set,Element:class {},queueMicrotask,
+ const runtime={console,Set,Element:class {},queueMicrotask, TextEncoder, Uint8Array, btoa, crypto:require('node:crypto').webcrypto,
   document:{readyState:'loading',addEventListener(){}},getContext:()=>ctx,
   ST:{isGenerating:()=>false,replaceCurrentChat:async()=>{requests.push('replace');ctx.characters[0].chat=[...disk][0]||'new';},displayPastChats:async()=>requests.push('refresh')},
   Group:{editGroup:async()=>requests.push('save-group'),openGroupChat:async(_,n)=>{ctx.groups[0].chat_id=n;},createNewGroupChat:async()=>{ctx.groups[0].chats.push('new');ctx.groups[0].chat_id='new';}},
   fetch:async(url,options)=>{
-   const body=JSON.parse(options.body);requests.push({url,body,headers:options.headers});
+   if(url.startsWith('/files/'))return {ok:archiveFiles.has(url),status:archiveFiles.has(url)?200:404,text:async()=>archiveFiles.get(url)};
+   const body=JSON.parse(options.body);
+   if(url==='/api/files/upload'){const path='/files/'+body.name;archiveFiles.set(path,Buffer.from(body.data,'base64').toString('utf8'));return {ok:true,json:async()=>({path})};}
+   if(url==='/api/chats/export')return {ok:true,json:async()=>({result:raw})};requests.push({url,body,headers:options.headers});
    if(url==='/api/chats/search')return {ok:true,json:async()=>[...disk].map(file_name=>({file_name}))};
    const name=body.id??body.chatfile.slice(0,-6);
    if(name===failName)return {ok:false,status:500};
-   if(!disk.has(name))return {ok:false,status:400};disk.delete(name);return {ok:true,status:200};
+   if(!disk.has(name))return {ok:false,status:400};disk.delete(name);return {ok:true,status:200,json:async()=>({ok:true})};
   }};
  vm.createContext(runtime);vm.runInContext(src+'\nglobalThis.testApi=api;globalThis.capture=captureTarget;',runtime);
  return {runtime,ctx,disk,requests,events,fail:n=>{failName=n;}};

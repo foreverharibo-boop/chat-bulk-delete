@@ -2,7 +2,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js', 'utf8').replace(/^import .*;\n/gm, '');
+const vaultSource = fs.readFileSync(fs.existsSync('vault.js') ? 'vault.js' : 'chat-bulk-delete/vault.js', 'utf8').replace(/^export /gm, '');
+const source = vaultSource + '\n' + fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js', 'utf8').replace(/^import .*;\n/gm, '');
 const names = ['현재 방', '전여친1', '김홍진 - imported', '전여친1 - Branch #1'];
 function fixture(isGroup) {
     const stores = {
@@ -13,22 +14,28 @@ function fixture(isGroup) {
     };
     const currentNames = isGroup ? names.map(n => `g1-${n}`) : names;
     const calls = [];
+    const archiveFiles = new Map();
+    const raw = JSON.stringify({chat_metadata:{integrity:'fixture'}})+'\n'+JSON.stringify({name:'fixture',mes:'preserve me'});
     const ctx = {
         characterId:0, groupId:isGroup?'g1':null,
         characters:[{avatar:'current.png', chat:names[0]}, {avatar:'other.png',chat:names[0]}],
         groups:[{id:'g1',chat_id:currentNames[0],chats:[...currentNames]},{id:'g2',chat_id:`g2-${names[0]}`,chats:names.map(n=>`g2-${n}`)}],
         get chatId() { return this.groupId ? this.groups.find(g=>g.id===this.groupId).chat_id : this.characters[this.characterId].chat; },
+        get chat() { return [{name:'fixture',mes:'preserve me'}]; },
         getRequestHeaders:()=>({'X-CSRF-Token':'fixture'}), saveChat:async()=>{},
         eventTypes:{CHAT_DELETED:'deleted',GROUP_CHAT_DELETED:'group-deleted'},eventSource:{emit:async()=>{}},
     };
     let switchAfterList = false;
     const runtime = {
-        console, Set, Element:class{}, queueMicrotask,
+        console, Set, Element:class{}, queueMicrotask, TextEncoder, Uint8Array, btoa, crypto:require('node:crypto').webcrypto,
         document:{readyState:'loading',addEventListener(){}},getContext:()=>ctx,
         ST:{isGenerating:()=>false,displayPastChats:async()=>{},replaceCurrentChat:async()=>{ctx.characters[0].chat=[...stores['char:current.png']][0]||'new';}},
         Group:{editGroup:async()=>{},openGroupChat:async(id,n)=>{ctx.groups.find(g=>g.id===id).chat_id=n;},createNewGroupChat:async(id)=>{const g=ctx.groups.find(g=>g.id===id);g.chat_id='new';g.chats.push('new');}},
         fetch:async(url, opts)=>{
+            if (url.startsWith('/files/')) return {ok:archiveFiles.has(url),status:archiveFiles.has(url)?200:404,text:async()=>archiveFiles.get(url)};
             const body = JSON.parse(opts.body);
+            if(url === '/api/files/upload') { const path='/files/'+body.name; archiveFiles.set(path,Buffer.from(body.data,'base64').toString('utf8')); return {ok:true,json:async()=>({path})}; }
+            if(url === '/api/chats/export') return {ok:true,json:async()=>({result:raw})};
             if (url === '/api/chats/search') {
                 const scope = body.group_id ? `group:${body.group_id}` : `char:${body.avatar_url}`;
                 const result = [...stores[scope]].map(file_name=>({file_name}));
@@ -41,12 +48,12 @@ function fixture(isGroup) {
             else {name=body.id;scope=Object.keys(stores).find(k=>k.startsWith('group:')&&stores[k].has(name));}
             calls.push({scope,name});
             const deleted=stores[scope]?.delete(name);
-            return {ok:Boolean(deleted),status:deleted?200:400};
+            return {ok:Boolean(deleted),status:deleted?200:400,json:async()=>({ok:Boolean(deleted)})};
         },
     };
     vm.createContext(runtime);
     vm.runInContext(source+'\nglobalThis.scopeApi=api;globalThis.scopeTarget=captureTarget;',runtime);
-    return {stores,calls,ctx,runtime,currentNames,switchAfterList:()=>{switchAfterList=true;}};
+    return {stores,calls,ctx,runtime,currentNames,archiveFiles,switchAfterList:()=>{switchAfterList=true;}};
 }
 (async()=>{
     const batch = fs.readFileSync(fs.existsSync('batch.js') ? 'batch.js' : 'chat-bulk-delete/batch.js','utf8');
