@@ -79,7 +79,7 @@ function render() {
     if (!toolbar) return;
     popup.classList.toggle('cbd-selection-mode', mode);
     popup.classList.toggle('cbd-busy', busy);
-    toolbar.querySelector('[data-cbd-action="toggle"]').textContent = mode ? '선택 취소' : '여러 개 선택';
+    toolbar.querySelector('[data-cbd-action="toggle"]').textContent = mode ? '선택 취소' : '선택';
     for (const action of ['all', 'clear', 'delete', 'backup']) toolbar.querySelector(`[data-cbd-action="${action}"]`).hidden = !mode;
     toolbar.querySelector('[data-cbd-action="stop"]').hidden = !busy;
     for (const el of toolbar.querySelectorAll('button')) {
@@ -136,7 +136,6 @@ function applyView() {
     const visible = arrange(items, {
         order: filterControls.querySelector('[name="order"]').value,
         filter: filterControls.querySelector('[name="filter"]').value,
-        name: filterControls.querySelector('[name="name"]').value,
     });
     const shown = new Set(visible.map(x => x.row));
     for (const item of items) item.row.hidden = !shown.has(item.row);
@@ -491,7 +490,7 @@ function initialize() {
     if (!popup || !list || document.getElementById('cbd-toolbar')) return;
     toolbar = document.createElement('div');
     toolbar.id = 'cbd-toolbar';
-    toolbar.append(button('여러 개 선택', 'toggle'), button('현재 목록 전체 선택', 'all'),
+    toolbar.append(button('선택', 'toggle'), button('현재 목록 전체 선택', 'all'),
         button('선택 해제', 'clear'), button('휴지통으로 (0)', 'delete', 'cbd-delete'),
         button('선택 ZIP 백업', 'backup'), button('휴지통 / 복원', 'trash'), button('중단', 'stop'));
     const status = document.createElement('span');
@@ -502,8 +501,8 @@ function initialize() {
     list.before(toolbar);
     filterControls = document.createElement('div'); filterControls.id = 'cbd-filters';
     for (const [name, label, choices] of [
-        ['order', '정렬', [['newest', '최신순'], ['oldest', '오래된순'], ['name-asc', '이름순 (가→하 / A→Z)'], ['name-desc', '이름 역순'], ['size', '용량 큰순'], ['messages', '메시지 많은순']]],
-        ['filter', '필터', [['all', '전체'], ['locked', '잠긴 방'], ['unlocked', '잠기지 않은 방'], ['empty', '메시지 없는 방']]],
+        ['order', '정렬', [['newest', '최신순'], ['oldest', '오래된순'], ['name-asc', '오름차순 (이름)'], ['name-desc', '내림차순 (이름)'], ['size', '용량 큰순'], ['messages', '메시지 많은순']]],
+        ['filter', '필터', [['all', '전체'], ['locked', '잠긴 방'], ['unlocked', '안 잠긴 방']]],
     ]) {
         const wrapper = document.createElement('label'); wrapper.textContent = label;
         const select = document.createElement('select'); select.name = name; select.setAttribute('aria-label', label);
@@ -512,9 +511,6 @@ function initialize() {
         }
         wrapper.append(select); filterControls.append(wrapper);
     }
-    const nameInput = document.createElement('input'); nameInput.name = 'name'; nameInput.type = 'search';
-    nameInput.placeholder = '채팅방 이름으로 필터'; nameInput.setAttribute('aria-label', '채팅방 이름 필터');
-    filterControls.append(nameInput);
     filterControls.addEventListener('input', onListChanged);
     filterControls.addEventListener('change', onListChanged);
     list.before(filterControls);
