@@ -26,7 +26,8 @@ function base64(text) {
     return btoa(binary);
 }
 export class ChatVault {
-    constructor({ post, getContext, fetcher = fetch }) {
+    // Keep the browser's global receiver; calling raw fetch as this.fetcher throws.
+    constructor({ post, getContext, fetcher = (...args) => globalThis.fetch(...args) }) {
         this.post = post; this.getContext = getContext; this.fetcher = fetcher;
         this.state = { version: 2, revision: '', entries: [], locks: {} };
         this.ready = false;

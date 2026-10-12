@@ -47,6 +47,35 @@ function setup() {
     const options={post,getContext:()=>ctx,fetcher};
     return {vault:new ChatVault(options),options,files,chats,calls,ctx,fail:value=>{failure=value;},corrupt:()=>{corrupt=true;}};
 }
+// Browser fetch requires Window as its receiver; arrow-only mocks hide this bug.
+{
+    const f = setup();
+    const originalFetch = globalThis.fetch;
+    const reads = [];
+    globalThis.fetch = async function (path, options) {
+        if (this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+        reads.push(path);
+        assert.equal(options.cache, 'no-store');
+        assert.deepEqual(options.headers, f.ctx.getRequestHeaders());
+        return f.options.fetcher(path, options);
+    };
+    try {
+        const vault = new ChatVault({ post: f.options.post, getContext: f.options.getContext });
+        await vault.load();
+        assert.equal(vault.ready, true);
+        await vault.setLock(t, '다른 방', true);
+        const entry = await vault.archive(t, '현재');
+        assert.equal((await vault.readEntry(entry)).raw, raw);
+        await vault.restore(entry);
+        assert.ok(reads.includes('/files/cbd-v2-state.json'));
+        assert.ok(reads.includes(entry.path));
+        assert.equal(f.chats.get(scopeKey(t) + '|현재'), raw);
+        assert.equal(f.chats.get(scopeKey(other) + '|현재'), raw);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+    console.log('PASS: default browser fetch keeps the global receiver for load, locks, archive verification and restore');
+}
 let f=setup();
 await f.vault.setLock(t,'현재',true);
 assert.ok(f.vault.isLocked(t,'현재'));
