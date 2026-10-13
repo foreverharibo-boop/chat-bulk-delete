@@ -149,7 +149,7 @@ function render() {
             }
             row.style.setProperty('--cbd-duplicate-color', `hsl(${(duplicate.group * 137.508 + 195) % 360} 65% 50%)`);
             badge.textContent = `같은 내용 ${duplicate.group} · ${duplicate.count}개`;
-            badge.title = '마지막 중복 검사 기준 · 파일 이름/방 설정/메시지 시각 제외 · 삭제 전 내용 확인';
+            badge.title = '대화 전체 원문·순서·발화자·숨김 상태·첨부 정보 기준 · 번역/다른 스와이프/방 설정은 다를 수 있음 · 삭제 전 확인';
         } else {
             badge?.remove();
             row.style?.removeProperty('--cbd-duplicate-color');

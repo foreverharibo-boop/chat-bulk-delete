@@ -1,5 +1,5 @@
-// Read-only comparison. Conversation headers and message timing are not content.
-const timingKeys = new Set(['send_date', 'gen_started', 'gen_finished']);
+// Read-only comparison of the selected conversation, not the entire backup file.
+const attachmentKeys = ['image', 'file', 'files', 'media', 'video', 'audio'];
 function stable(value) {
     if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
     if (value && typeof value === 'object') {
@@ -16,11 +16,23 @@ export function conversationContent(raw) {
         if (!message || typeof message !== 'object' || Array.isArray(message)) throw new Error('올바른 채팅 파일이 아니야.');
         if (i === 0 && !Object.hasOwn(message, 'mes')
             && (Object.hasOwn(message, 'chat_metadata') || Object.hasOwn(message, 'user_name'))) continue;
-        // Preserve speaker, role, hidden messages, swipes, translations, attachments
-        // and all other fields. Do not trim or normalize message text.
-        const content = Object.fromEntries(Object.entries(message).filter(([key]) => !timingKeys.has(key)));
+        if (typeof message.mes !== 'string') throw new Error('메시지 본문을 확인할 수 없어.');
+        // mes is the selected swipe's original text. Optional bookkeeping,
+        // alternative swipes, translations and extension data are not this text.
+        // Preserve every message (including hidden ones), whitespace and order.
+        const content = {
+            name: message.name ?? '', is_user: Boolean(message.is_user),
+            is_system: Boolean(message.is_system), mes: message.mes,
+            attachments: {},
+        };
+        for (const key of attachmentKeys) {
+            const value = message.extra?.[key];
+            if (value == null || value === '' || (Array.isArray(value) && !value.length)) continue;
+            content.attachments[key] = value;
+        }
         messages.push(stable(content));
     }
+    if (!messages.length) throw new Error('비교할 메시지가 없어.');
     return '[' + messages.join(',') + ']';
 }
 export async function findDuplicateChats(names, read, { hash, shouldStop = () => false, assertContext = () => {}, progress = () => {} }) {
