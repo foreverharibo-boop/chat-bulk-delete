@@ -106,5 +106,80 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
         assert.equal(vm.runInContext('duplicateGroups.size', f.runtime), 4);
         assert.equal(vm.runInContext('selected.size', f.runtime), 0);
     });
+    await check('permanent deletion checks locks, shared group files and changing scope without archiving', async () => {
+        let f = fixtures.makeFixture(false);
+        await vm.runInContext('getVault()', f.runtime).setLock(f.runtime.scopeTarget(), '전여친1', true);
+        await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), '전여친1', {permanent:true}));
+        assert.equal(f.calls.length,0);
+        f = fixtures.makeFixture(true);
+        f.ctx.groups[1].chats.push(f.currentNames[1]);
+        await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), f.currentNames[1], {permanent:true}));
+        assert.equal(f.calls.length,0); assert.equal(f.archiveFiles.size,0);
+        f = fixtures.makeFixture(false);
+        const fetch = f.runtime.fetch;
+        f.runtime.fetch = async (url,options) => {
+            const response = await fetch(url,options);
+            if(url.endsWith('cbd-v2-state.json')) f.ctx.characterId=1;
+            return response;
+        };
+        await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), '전여친1', {permanent:true}));
+        assert.equal(f.calls.length,0); assert.equal(f.archiveFiles.size,0);
+    });
+    await check('permanent confirmation cancels without deletion; confirmed operation skips trash; changed selection aborts', async () => {
+        for (const scenario of ['cancel','confirm','selection-change','scope-change']) {
+            const f = fixtures.makeFixture(false);
+            f.runtime.document.createElement = tag => ({tag,children:[],append(...children){this.children.push(...children);}});
+            f.runtime.POPUP_TYPE = {CONFIRM:1,TEXT:2}; f.runtime.POPUP_RESULT = {AFFIRMATIVE:1};
+            f.runtime.deleteSelected = deleteSelected;
+            f.runtime.callGenericPopup = async (content,type,text,options) => {
+                assert.equal(type,1); assert.match(options.okButton,/영구 삭제/);
+                assert.match(content.children[1].textContent,/휴지통에 보관하지 않고/);
+                assert.deepEqual(content.children[2].children.map(x=>x.textContent),['전여친1']);
+                if(scenario==='selection-change') vm.runInContext("selected.add('김홍진 - imported')",f.runtime);
+                if(scenario==='scope-change') f.ctx.characterId=1;
+                return scenario==='cancel'?0:1;
+            };
+            vm.runInContext("render=()=>{};target=captureTarget();selected.add('전여친1');toolbar={querySelector:()=>({focus(){}})};list={querySelectorAll:()=>[{querySelector:()=>({getAttribute:()=> '전여친1'})}]};",f.runtime);
+            await vm.runInContext('runDelete(true)',f.runtime);
+            assert.equal(f.calls.length,scenario==='confirm'?1:0);
+            assert.equal(f.archiveFiles.size,0);
+        }
+    });
+    await check('trash empty confirmation captures only displayed scope; cancel, new entries and scope changes are respected', async () => {
+        for (const scenario of ['cancel','confirm','scope-change']) {
+            const f = fixtures.makeFixture(false), t = f.runtime.scopeTarget();
+            const entries = [
+                {id:'a'.repeat(32),name:'현재 캐릭터 보관본',target:t,created:1,status:'trashed'},
+                {id:'b'.repeat(32),name:'다른 캐릭터 보관본',target:{kind:'character',avatar:'other.png'},created:2,status:'trashed'},
+            ];
+            const purged = []; let dialog;
+            f.runtime.trashVault = {state:{entries},load:async()=>{},purgeEntry:async(scope,entry,guard)=>{
+                guard(); assert.equal(scope.avatar,'current.png'); purged.push(entry.id);
+                f.runtime.trashVault.state.entries=f.runtime.trashVault.state.entries.filter(x=>x.id!==entry.id);
+            }};
+            f.runtime.document.createElement = tag => ({tag,children:[],dataset:{},handlers:{},
+                setAttribute(){},append(...children){for(const child of children){child.parent=this;this.children.push(child);}},
+                addEventListener(event,handler){this.handlers[event]=handler;},
+                remove(){this.parent.children=this.parent.children.filter(x=>x!==this);},
+                querySelector(selector){const id=selector.match(/data-cbd-trash-id="([^"]+)"/)?.[1];return this.children.find(x=>x.dataset?.cbdTrashId===id);}});
+            f.runtime.POPUP_TYPE={TEXT:2,CONFIRM:1};f.runtime.POPUP_RESULT={AFFIRMATIVE:1};
+            f.runtime.callGenericPopup=async(content,type)=>{
+                if(type===2){dialog=content;return 0;}
+                assert.deepEqual(content.children[1].children.map(x=>x.textContent),['현재 캐릭터 보관본']);
+                if(scenario==='scope-change')f.ctx.characterId=1;
+                return scenario==='cancel'?0:1;
+            };
+            vm.runInContext('vault=trashVault;render=()=>{};',f.runtime);
+            await vm.runInContext('showTrash()',f.runtime);
+            // Entries added after opening are outside the user's captured confirmation.
+            f.runtime.trashVault.state.entries.push({id:'c'.repeat(32),name:'나중에 추가됨',target:t});
+            const empty=dialog.children.find(x=>x.dataset?.cbdAction==='empty-trash');
+            await empty.handlers.click();
+            assert.deepEqual(purged,scenario==='confirm'?['a'.repeat(32)]:[]);
+            assert.ok(f.runtime.trashVault.state.entries.some(x=>x.id==='b'.repeat(32)));
+            assert.ok(f.runtime.trashVault.state.entries.some(x=>x.id==='c'.repeat(32)));
+            assert.equal(f.calls.length,0);
+        }
+    });
     if (checks.length) process.exitCode = 1;
 })().catch(error => { console.error(error); process.exitCode = 1; });

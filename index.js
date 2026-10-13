@@ -97,7 +97,7 @@ function render() {
     popup.classList.toggle('cbd-selection-mode', mode);
     popup.classList.toggle('cbd-busy', busy);
     toolbar.querySelector('[data-cbd-action="toggle"]').textContent = mode ? '선택 취소' : '선택';
-    for (const action of ['all', 'clear', 'delete', 'backup']) toolbar.querySelector(`[data-cbd-action="${action}"]`).hidden = !mode;
+    for (const action of ['all', 'clear', 'delete', 'permanent', 'backup']) toolbar.querySelector(`[data-cbd-action="${action}"]`).hidden = !mode;
     toolbar.querySelector('[data-cbd-action="stop"]').hidden = !busy;
     for (const el of toolbar.querySelectorAll('button')) {
         el.disabled = busy && el.dataset.cbdAction !== 'stop';
@@ -106,6 +106,8 @@ function render() {
     const deletable = [...selected].filter(name => !locked(scope, name)).length;
     toolbar.querySelector('[data-cbd-action="delete"]').textContent = `휴지통으로 (${deletable})`;
     toolbar.querySelector('[data-cbd-action="delete"]').disabled = busy || !getVault().ready || deletable === 0;
+    toolbar.querySelector('[data-cbd-action="permanent"]').textContent = `영구 삭제 (${deletable})`;
+    toolbar.querySelector('[data-cbd-action="permanent"]').disabled = busy || !getVault().ready || deletable === 0;
     toolbar.querySelector('[data-cbd-action="backup"]').disabled = busy || selected.size === 0;
     for (const control of filterControls?.querySelectorAll('input, select') || []) control.disabled = busy;
     toolbar.querySelector('[data-cbd-action="stop"]').disabled = stopRequested;
@@ -206,7 +208,7 @@ const api = {
         if (!Array.isArray(data)) throw new Error('채팅 목록 응답이 올바르지 않아.');
         return data.map(chat => chat.file_name);
     },
-    async remove(t, name) {
+    async remove(t, name, { permanent = false } = {}) {
         if (!sameTarget(t)) throw new Error('채팅 대상이 바뀌었어.');
         if (locked(t, name)) throw new Error('잠긴 채팅은 삭제할 수 없어.');
         if (t.kind === 'group') {
@@ -218,14 +220,14 @@ const api = {
                 throw new Error('다른 그룹에서도 사용하는 채팅 파일이라 삭제하지 않았어.');
             }
         }
-        const entry = await getVault().archive(t, name);
-        if (stopRequested) throw new Error('중단 요청으로 원본을 삭제하지 않았어. 보관본은 휴지통에 남아 있어.');
+        const entry = permanent ? null : await getVault().archive(t, name);
+        if (stopRequested) throw new Error('중단 요청으로 원본을 삭제하지 않았어.');
         if (!sameTarget(t) || api.currentChat() !== t.active || api.isGenerating()) {
-            throw new Error('보관 중 채팅 상태가 바뀌어서 원본을 삭제하지 않았어.');
+            throw new Error('채팅 상태가 바뀌어서 원본을 삭제하지 않았어.');
         }
         if (name === t.active) {
-            const record = await getVault().readEntry(entry);
-            verifyOpenChat(record.raw, t, name);
+            const raw = permanent ? await getVault().exportChat(t, name) : (await getVault().readEntry(entry)).raw;
+            verifyOpenChat(raw, t, name);
         }
         // Recheck locks after the archive upload, before the destructive request.
         await getVault().load();
@@ -237,17 +239,19 @@ const api = {
             if (!group?.chats.includes(name) || getContext().groups.some(g => String(g.id) !== String(t.id)
                 && (g.chats?.includes(name) || g.chat_id === name))) throw new Error('그룹 파일 참조가 바뀌어서 삭제를 중단했어.');
             const response = await post('/api/chats/group/delete', { id: name });
-            if ((await response.json()).ok !== true) throw new Error('삭제 응답을 확인할 수 없어. 휴지통 보관본은 유지돼.');
+            if ((await response.json()).ok !== true) throw new Error('삭제 응답을 확인할 수 없어. 목록을 다시 확인해줘.');
             const index = group.chats.indexOf(name);
             if (index !== -1) group.chats.splice(index, 1);
         } else {
             // Search returns the exact chat name without the file extension.
             const response = await post('/api/chats/delete', { avatar_url: t.avatar, chatfile: `${name}.jsonl` });
-            if ((await response.json()).ok !== true) throw new Error('삭제 응답을 확인할 수 없어. 휴지통 보관본은 유지돼.');
+            if ((await response.json()).ok !== true) throw new Error('삭제 응답을 확인할 수 없어. 목록을 다시 확인해줘.');
         }
         // An interrupted status update must never lose the already verified copy.
-        try { await getVault().mark(entry.id, 'trashed'); }
-        catch (error) { notice('warning', `원본 삭제 후 상태 기록 실패: ${error.message} 휴지통의 확인 필요 항목에서 복원할 수 있어.`); }
+        if (entry) {
+            try { await getVault().mark(entry.id, 'trashed'); }
+            catch (error) { notice('warning', `원본 삭제 후 상태 기록 실패: ${error.message} 휴지통의 확인 필요 항목에서 복원할 수 있어.`); }
+        }
     },
     async afterDelete(t, name) {
         clearDuplicates();
@@ -283,13 +287,15 @@ const api = {
         if (sameTarget(t)) await ST.displayPastChats();
     },
 };
-function confirmContent(names) {
+function confirmContent(names, permanent = false) {
     const content = document.createElement('div');
     content.className = 'cbd-confirm';
     const title = document.createElement('h3');
-    title.textContent = `선택한 채팅방 ${names.length}개를 휴지통으로 옮길까?`;
+    title.textContent = permanent ? `선택한 채팅방 ${names.length}개를 영구 삭제할까?` : `선택한 채팅방 ${names.length}개를 휴지통으로 옮길까?`;
     const explanation = document.createElement('p');
-    explanation.textContent = '서버에 보관본을 저장하고 다시 읽어 확인한 방만 원본을 삭제해. 휴지통에서 복원할 수 있어. 잠긴 방은 제외돼.';
+    explanation.textContent = permanent
+        ? '휴지통에 보관하지 않고 아래 채팅 파일을 바로 삭제해. 이 작업으로는 복원할 수 없어. 잠긴 방은 제외돼.'
+        : '서버에 보관본을 저장하고 다시 읽어 확인한 방만 원본을 삭제해. 휴지통에서 복원할 수 있어. 잠긴 방은 제외돼.';
     const ul = document.createElement('ul');
     for (const name of names) {
         const li = document.createElement('li');
@@ -299,7 +305,7 @@ function confirmContent(names) {
     content.append(title, explanation, ul);
     return content;
 }
-async function runDelete() {
+async function runDelete(permanent = false) {
     if (busy || confirming || !target || selected.size === 0) return;
     if (!sameTarget(target)) { reset(); notice('warning', '채팅 대상이 바뀌었어. 다시 선택해줘.'); return; }
     if (api.isGenerating()) { notice('warning', '답변 생성이 끝난 다음 삭제해줘.'); return; }
@@ -317,13 +323,13 @@ async function runDelete() {
             notice('warning', '채팅 상태나 선택이 바뀌었어. 다시 선택해줘.'); return;
         }
         names = chosen.filter(name => !locked(snapshot, name));
-        if (!names.length) { notice('warning', '잠긴 방은 휴지통으로 이동할 수 없어.'); return; }
+        if (!names.length) { notice('warning', '잠긴 방은 삭제할 수 없어.'); return; }
         const visibleNames = new Set(visibleRows().map(rowName));
         if (names.some(name => !visibleNames.has(name))) {
             onListChanged(); notice('warning', '현재 목록에 없는 선택이 있어서 해제했어. 다시 선택해줘.'); return;
         }
-        result = await callGenericPopup(confirmContent(names), POPUP_TYPE.CONFIRM, '', {
-            okButton: `${names.length}개 휴지통으로`, cancelButton: '취소',
+        result = await callGenericPopup(confirmContent(names, permanent), POPUP_TYPE.CONFIRM, '', {
+            okButton: `${names.length}개 ${permanent ? '영구 삭제' : '휴지통으로'}`, cancelButton: '취소',
         });
     } finally { confirming = false; }
     if (result !== POPUP_RESULT.AFFIRMATIVE) return;
@@ -334,16 +340,17 @@ async function runDelete() {
     busy = true;
     stopRequested = false;
     document.body.classList.add('cbd-operation-running');
-    statusText = `보관 후 이동 중… 0 / ${names.length}`;
+    statusText = `${permanent ? '영구 삭제' : '보관 후 이동'} 중… 0 / ${names.length}`;
     render();
     toolbar.querySelector('[data-cbd-action="stop"]').focus();
     try {
-        const report = await deleteSelected(names, snapshot, api, (done, failed, total) => {
+        const operationApi = { ...api, remove: (t, name) => api.remove(t, name, { permanent }) };
+        const report = await deleteSelected(names, snapshot, operationApi, (done, failed, total) => {
             statusText = `처리 ${done + failed} / ${total} · 삭제 ${done} · 실패 ${failed}`;
             render();
         }, () => stopRequested);
         for (const name of report.deleted) selected.delete(name);
-        statusText = `삭제 ${report.deleted.length}개` + (report.failed.length ? ` · 실패 ${report.failed.length}개` : '')
+        statusText = `${permanent ? '영구 삭제' : '휴지통 이동'} ${report.deleted.length}개` + (report.failed.length ? ` · 실패 ${report.failed.length}개` : '')
             + (report.stopped ? ' · 중단됨' : ' · 완료');
         notice(report.failed.length || report.warnings.length || report.stopped ? 'warning' : 'success', statusText);
         if (report.failed.length || report.warnings.length) {
@@ -463,17 +470,63 @@ async function showTrash() {
     if (busy || confirming) return;
     const snapshot = captureTarget();
     await getVault().load();
+    if (!sameTarget(snapshot)) throw new Error('캐릭터/그룹이 바뀌었어. 휴지통을 다시 열어줘.');
     const content = document.createElement('div'); content.className = 'cbd-trash';
     const title = document.createElement('h3'); title.textContent = '이 캐릭터 / 그룹의 휴지통';
     const help = document.createElement('p');
     help.textContent = '복원은 원래 캐릭터/그룹에 새 이름으로 저장해. 보관본은 복원 후에도 남아 있어. 자동 비우기는 하지 않아.';
     const entries = getVault().state.entries.filter(x => scopeKey(x.target) === scopeKey(snapshot)).sort((a, b) => b.created - a.created);
     content.append(title, help);
+    const emptyButton = button(`휴지통 비우기 (${entries.length})`, 'empty-trash', 'cbd-delete');
+    emptyButton.disabled = !entries.length;
+    const trashStatus = document.createElement('p');
+    trashStatus.setAttribute('role', 'status');
+    content.append(emptyButton, trashStatus);
+    emptyButton.addEventListener('click', () => {
+        return (async () => {
+            if (busy || confirming || emptyButton.disabled) return;
+            const captured = entries.filter(entry => getVault().state.entries.some(x => x.id === entry.id));
+            if (!captured.length) return;
+            const confirm = document.createElement('div'); confirm.className = 'cbd-confirm';
+            const message = document.createElement('p');
+            message.textContent = `이 캐릭터/그룹의 휴지통 보관본 ${captured.length}개를 영구 삭제할까? 복원 완료 항목도 포함돼. 보관본은 복구할 수 없어. 원래 채팅과 복원된 채팅은 유지돼.`;
+            const names = document.createElement('ul');
+            for (const entry of captured) { const item = document.createElement('li'); item.textContent = entry.name; names.append(item); }
+            confirm.append(message, names);
+            let result;
+            confirming = true;
+            try { result = await callGenericPopup(confirm, POPUP_TYPE.CONFIRM, '', {okButton:'보관본 영구 삭제',cancelButton:'취소'}); }
+            finally { confirming = false; }
+            if (result !== POPUP_RESULT.AFFIRMATIVE) return;
+            await withBusy(async () => {
+                const assertContext = () => {
+                    if (!sameTarget(snapshot) || stopRequested) throw new Error('대상이 바뀌었거나 중단을 요청해서 비우기를 멈췄어.');
+                };
+                let done = 0;
+                const failures = [];
+                for (const entry of captured) {
+                    assertContext();
+                    try {
+                        await getVault().purgeEntry(snapshot, entry, assertContext);
+                        content.querySelector(`[data-cbd-trash-id="${entry.id}"]`)?.remove();
+                        done++;
+                    } catch (error) { failures.push(`${entry.name}: ${error.message}`); }
+                    trashStatus.textContent = `보관본 영구 삭제 ${done}개 · 실패 ${failures.length}개`;
+                }
+                trashStatus.textContent = [`보관본 영구 삭제 ${done}개 · 실패 ${failures.length}개`, ...failures].join('\n');
+                const remaining = entries.filter(entry => getVault().state.entries.some(x => x.id === entry.id)).length;
+                emptyButton.textContent = `휴지통 비우기 (${remaining})`;
+                emptyButton.disabled = !remaining;
+                notice(failures.length ? 'warning' : 'success', `휴지통 보관본 ${done}개 영구 삭제 · 실패 ${failures.length}개`);
+            });
+        })().catch(error => notice('error', error.message));
+    });
     if (!entries.length) {
         const empty = document.createElement('p'); empty.textContent = '휴지통이 비어 있어.'; content.append(empty);
     }
     for (const entry of entries) {
         const row = document.createElement('div'); row.className = 'cbd-trash-row';
+        row.dataset.cbdTrashId = entry.id;
         const label = document.createElement('p');
         const stateLabel = { prepared: '보관됨 · 원본 삭제 여부 확인 필요', trashed: '휴지통', restored: '복원 완료 · 보관본 유지' }[entry.status] || '확인 필요';
         label.textContent = `${entry.name}\n${new Date(entry.created).toLocaleString()} · ${stateLabel}`;
@@ -518,6 +571,7 @@ function onClick(event) {
             statusText = ''; render();
         } else if (action === 'clear') { selected.clear(); statusText = ''; render(); }
         else if (action === 'delete') void runDelete().catch(error => notice('error', error.message));
+        else if (action === 'permanent') void runDelete(true).catch(error => notice('error', error.message));
         else if (action === 'backup') void runBackup().catch(error => notice('error', error.message));
         else if (action === 'trash') void showTrash().catch(error => notice('error', error.message));
         else if (action === 'duplicates') void runDuplicateScan().catch(error => notice('error', error.message));
@@ -563,6 +617,7 @@ function initialize() {
     toolbar.id = 'cbd-toolbar';
     toolbar.append(button('선택', 'toggle'), button('현재 목록 전체 선택', 'all'),
         button('선택 해제', 'clear'), button('휴지통으로 (0)', 'delete', 'cbd-delete'),
+        button('영구 삭제 (0)', 'permanent', 'cbd-delete'),
         button('선택 ZIP 백업', 'backup'), button('휴지통 / 복원', 'trash'),
         button('중복 확인', 'duplicates'), button('중단', 'stop'));
     const status = document.createElement('span');

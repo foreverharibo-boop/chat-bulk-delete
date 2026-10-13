@@ -131,6 +131,54 @@ export class ChatVault {
             || typeof record.raw !== 'string') throw new Error('휴지통 파일과 목록 정보가 일치하지 않아.');
         return record;
     }
+    purgeEntry(target, expected, assertContext = () => {}) {
+        // Serialize with lock/archive writes. Only delete the exact captured backup.
+        const work = this.queue.then(async () => {
+            assertContext();
+            await this.load();
+            const matches = this.state.entries.filter(x => x.id === expected.id);
+            const entry = matches[0];
+            const path = `user/files/cbd-v2-trash-${expected.id}.json`;
+            const matchesExpected = x => x && x.id === expected.id && x.name === expected.name
+                && x.path === expected.path && scopeKey(x.target) === scopeKey(target)
+                && scopeKey(expected.target) === scopeKey(target);
+            if (!/^[a-f0-9]{32}$/.test(expected.id) || matches.length !== 1 || !matchesExpected(entry)
+                || typeof entry.path !== 'string' || entry.path.replace(/^\//, '') !== path
+                || this.state.entries.some(x => x.id !== entry.id && x.path?.replace(/^\//, '') === path)) {
+                throw new Error('휴지통 항목이 바뀌었거나 보관 경로가 일치하지 않아. 다시 열어줘.');
+            }
+            // A previous deletion may have succeeded before its index write failed.
+            const raw = await this.read(entry.path, true);
+            if (raw !== null) {
+                const record = JSON.parse(raw);
+                if (record.id !== entry.id || record.name !== entry.name
+                    || scopeKey(record.target) !== scopeKey(target) || typeof record.raw !== 'string') {
+                    throw new Error('보관본의 원래 채팅 정보를 확인할 수 없어. 삭제하지 않았어.');
+                }
+                assertContext();
+                // The files API expects a path relative to the current user's root.
+                const response = await this.post('/api/files/delete', { path });
+                if (!response.ok) throw new Error('보관본 삭제 요청에 실패했어.');
+                if (await this.read(entry.path, true) !== null) throw new Error('보관본이 아직 남아 있어. 삭제 완료로 처리하지 않았어.');
+            }
+            try {
+                await this.load();
+                const current = this.state.entries.filter(x => x.id === expected.id);
+                if (current.length > 1 || (current.length === 1 && !matchesExpected(current[0]))) {
+                    throw new Error('휴지통 목록이 바뀌었어.');
+                }
+                const next = JSON.parse(JSON.stringify(this.state));
+                next.entries = next.entries.filter(x => x.id !== expected.id);
+                next.revision = uniqueId();
+                await this.upload(STATE_FILE, JSON.stringify(next));
+                this.state = next;
+            } catch (error) {
+                throw new Error(`보관본은 삭제됐지만 목록 정리가 실패했어. 다시 비우면 정리돼: ${error.message}`);
+            }
+        });
+        this.queue = work.catch(() => {});
+        return work;
+    }
     async restore(entry) {
         const record = await this.readEntry(entry);
         const t = record.target;

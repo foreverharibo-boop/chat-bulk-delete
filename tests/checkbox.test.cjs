@@ -13,7 +13,7 @@ class Node {
     matches(selector){return selector==='.cbd-check'&&this.className==='cbd-check';}
 }
 const controls={};
-for(const name of ['toggle','all','clear','delete','stop','backup','trash']){const node=new Node('button');node.dataset.cbdAction=name;controls[name]=node;}
+for(const name of ['toggle','all','clear','delete','permanent','stop','backup','trash']){const node=new Node('button');node.dataset.cbdAction=name;controls[name]=node;}
 const status=new Node();const toolbarNode=new Node();
 toolbarNode.querySelector=selector=>selector==='.cbd-status'?status:controls[selector.match(/"([^"]+)"/)[1]];
 toolbarNode.querySelectorAll=()=>Object.values(controls);
@@ -56,9 +56,11 @@ assert.equal(rows[0].querySelector('.cbd-lock').getAttribute('aria-pressed'),'tr
 ui.click(eventFor(rows[0].card));
 assert.deepEqual([...ui.selected()],['방 B','방 A']);
 assert.equal(controls.delete.textContent,'휴지통으로 (1)');
+assert.equal(controls.permanent.textContent,'영구 삭제 (1)');
 assert.equal(controls.backup.disabled,false);
 ui.click(eventFor(controls.clear));rows[1].hidden=true;
 ui.click(eventFor(controls.all));assert.equal(ui.selected().length,0);
+assert.equal(controls.permanent.disabled,true);
 rows[1].hidden=false;
 vm.runInContext("duplicateScope=scopeKey(captureTarget());duplicateGroups.set('방 A',{group:1,count:2});duplicateGroups.set('방 B',{group:1,count:2});render();",runtime);
 assert.equal(rows[0].querySelector('.cbd-duplicate-badge').textContent,'같은 내용 1 · 2개');

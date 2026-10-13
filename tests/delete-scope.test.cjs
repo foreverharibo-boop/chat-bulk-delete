@@ -61,17 +61,19 @@ function fixture(isGroup) {
     const batch = fs.readFileSync(fs.existsSync('batch.js') ? 'batch.js' : 'chat-bulk-delete/batch.js','utf8');
     const { deleteSelected } = await import('data:text/javascript;base64,'+Buffer.from(batch).toString('base64'));
     let combinations = 0;
-    for(const isGroup of [false,true]) {
+    for(const permanent of [false,true]) for(const isGroup of [false,true]) {
         for(let mask=0;mask<16;mask++) {
             const f=fixture(isGroup);
             const selected=f.currentNames.filter((_,i)=>mask&(1<<i));
             const expectedScope=isGroup?'group:g1':'char:current.png';
             const before=Object.fromEntries(Object.entries(f.stores).map(([k,v])=>[k,[...v]]));
-            const report=await deleteSelected(selected,f.runtime.scopeTarget(),f.runtime.scopeApi,()=>{},()=>false);
+            const operationApi = {...f.runtime.scopeApi,remove:(t,name)=>f.runtime.scopeApi.remove(t,name,{permanent})};
+            const report=await deleteSelected(selected,f.runtime.scopeTarget(),operationApi,()=>{},()=>false);
             assert.equal(report.failed.length,0);
             assert.equal(f.calls.length,selected.length);
             assert.deepEqual([...f.calls.map(c=>c.name)].sort(),[...selected].sort());
             assert.ok(f.calls.every(c=>c.scope===expectedScope&&selected.includes(c.name)));
+            if (permanent) assert.equal(f.archiveFiles.size,0,'direct permanent deletion must not create a backup or index');
             assert.deepEqual([...f.stores[expectedScope]],f.currentNames.filter(n=>!selected.includes(n)));
             for(const [scope,original] of Object.entries(before)) {
                 if(scope!==expectedScope) assert.deepEqual([...f.stores[scope]],original,scope);

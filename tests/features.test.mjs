@@ -29,6 +29,11 @@ function setup() {
             files.set('/user/files/'+body.name,Buffer.from(body.data,'base64').toString('utf8'));
             return {json:async()=>({path:'/user/files/'+body.name})};
         }
+        if(url === '/api/files/delete') {
+            assert.match(body.path, /^user\/files\/cbd-v2-trash-[a-f0-9]{32}\.json$/);
+            const deleted = files.delete('/' + body.path);
+            return {ok:deleted,status:deleted?200:404};
+        }
         if(url === '/api/chats/export') {
             const scope=body.is_group ? scopeKey(group) : scopeKey({kind:'character',avatar:body.avatar_url});
             return {json:async()=>({result:chats.get(scope+'|'+body.file.slice(0,-6))})};
@@ -141,6 +146,59 @@ f=setup();e=await f.vault.archive(t,'현재');f.fail('/api/chats/save');await as
 assert.equal((await f.vault.readEntry(e)).raw,raw);
 console.log('PASS: upload/index/read/restore failures keep original or archive intact');
 const items=[{name:'방 10',index:0,count:10,size:200,locked:false},{name:'가나다',index:1,count:0,size:100,locked:true},{name:'방 2',index:2,count:2,size:300,locked:false}];
+// Emptying one scope must never touch live/restored chats, other backups or locks.
+{
+    const f = setup();
+    const first = await f.vault.archive(t, '현재');
+    const second = await f.vault.archive(t, '현재');
+    const otherEntry = await f.vault.archive(other, '현재');
+    const groupEntry = await f.vault.archive(group, '현재');
+    await f.vault.restore(first);
+    await f.vault.setLock(other, '현재', true);
+    const originalChats = [...f.chats], originalLocks = JSON.stringify(f.vault.state.locks);
+    const callsBefore = f.calls.length;
+    for (const entry of [first, second]) await f.vault.purgeEntry(t, entry);
+    assert.deepEqual([...f.chats], originalChats);
+    assert.equal(JSON.stringify(f.vault.state.locks), originalLocks);
+    assert.deepEqual(f.vault.state.entries.map(x=>x.id), [otherEntry.id,groupEntry.id]);
+    assert.ok(!f.files.has(first.path)); assert.ok(!f.files.has(second.path));
+    assert.equal((await f.vault.readEntry(otherEntry)).raw, raw);
+    assert.equal((await f.vault.readEntry(groupEntry)).raw, raw);
+    assert.ok(f.calls.slice(callsBefore).every(x=>['/api/files/delete','/api/files/upload'].includes(x.url)));
+}
+for (const scenario of ['wrong-scope','wrong-path','changed-name','record-scope','offline','still-present','index-failure','cancelled']) {
+    const f = setup(), entry = await f.vault.archive(t, '현재');
+    const originalChats = [...f.chats];
+    if (scenario === 'wrong-path') await f.vault.mutate(state=>{state.entries[0].path='/user/files/cbd-v2-state.json';});
+    if (scenario === 'changed-name') await f.vault.mutate(state=>{state.entries[0].name='changed';});
+    if (scenario === 'record-scope') {
+        const record = JSON.parse(f.files.get(entry.path)); record.target = other;
+        f.files.set(entry.path, JSON.stringify(record));
+    }
+    if (scenario === 'offline') f.fail('/api/files/delete');
+    if (scenario === 'index-failure') f.fail('manifest');
+    if (scenario === 'still-present') {
+        const post = f.vault.post;
+        f.vault.post = (url,body)=>url==='/api/files/delete'?Promise.resolve({ok:true}):post(url,body);
+    }
+    const before = f.calls.length;
+    await assert.rejects(f.vault.purgeEntry(scenario==='wrong-scope'?other:t, entry,
+        ()=>{if(scenario==='cancelled')throw Error('cancel');}));
+    assert.deepEqual([...f.chats],originalChats);
+    assert.ok(f.vault.state.entries.some(x=>x.id===entry.id));
+    if (scenario !== 'index-failure') assert.ok(f.files.has(entry.path));
+    if (['wrong-scope','wrong-path','changed-name','record-scope','cancelled'].includes(scenario)) {
+        assert.ok(!f.calls.slice(before).some(x=>x.url==='/api/files/delete'));
+    }
+    if (scenario === 'index-failure') {
+        assert.ok(!f.files.has(entry.path));
+        f.fail('');
+        await f.vault.purgeEntry(t,entry);
+        assert.equal(f.vault.state.entries.length,0);
+        assert.equal(f.calls.filter(x=>x.url==='/api/files/delete').length,1,'retry cleans only index');
+    }
+}
+console.log('PASS: trash purge preserves live/restored/other-scope data and locks; stale/tampered paths, cancellation and server failures fail closed; index failure is retryable');
 assert.deepEqual(arrange(items,{order:'name-asc'}).map(x=>x.name),['가나다','방 2','방 10']);
 assert.deepEqual(arrange(items,{order:'name-desc'}).map(x=>x.name),['방 10','방 2','가나다']);
 assert.deepEqual(arrange(items,{order:'oldest'}).map(x=>x.index),[2,1,0]);
