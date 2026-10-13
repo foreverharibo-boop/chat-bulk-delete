@@ -52,7 +52,7 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
         assert.equal(f.calls.length, 0);
         assert.ok(f.stores['group:g1'].has(chosen));
     });
-    for (const failure of ['archive-upload', 'index-upload', 'archive-read', 'source-change']) {
+    for (const failure of ['archive-upload', 'index-upload', 'archive-path', 'archive-read', 'source-change']) {
         await check(`${failure} prevents every destructive request`, async () => {
             const f = fixtures.makeFixture(false);
             const fetch = f.runtime.fetch;
@@ -62,7 +62,8 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
                 if (url === '/api/files/upload' && ((failure === 'archive-upload' && body.name.includes('trash-'))
                     || (failure === 'index-upload' && body.name === 'cbd-v2-state.json'))) throw new Error('offline');
                 const response = await fetch(url, options);
-                if (failure === 'archive-read' && url.startsWith('/files/cbd-v2-trash-')) response.text = async () => 'truncated';
+                if (failure === 'archive-path' && url === '/api/files/upload') response.json = async () => ({path:'/user/files/cbd-v2-wrong.json'});
+                if (failure === 'archive-read' && url.startsWith('/user/files/cbd-v2-trash-')) response.text = async () => 'truncated';
                 if (url === '/api/chats/export') {
                     exports++;
                     if (failure === 'source-change' && exports > 1) response.json = async () => ({result:'changed'});

@@ -34,9 +34,9 @@ function fixture(isGroup) {
         ST:{isGenerating:()=>false,displayPastChats:async()=>{},replaceCurrentChat:async()=>{ctx.characters[0].chat=[...stores['char:current.png']][0]||'new';}},
         Group:{editGroup:async()=>{},openGroupChat:async(id,n)=>{ctx.groups.find(g=>g.id===id).chat_id=n;},createNewGroupChat:async(id)=>{const g=ctx.groups.find(g=>g.id===id);g.chat_id='new';g.chats.push('new');}},
         fetch:async(url, opts)=>{
-            if (url.startsWith('/files/')) return {ok:archiveFiles.has(url),status:archiveFiles.has(url)?200:404,text:async()=>archiveFiles.get(url)};
+            if (url.startsWith('/user/files/')) return {ok:archiveFiles.has(url),status:archiveFiles.has(url)?200:404,text:async()=>archiveFiles.get(url)};
             const body = JSON.parse(opts.body);
-            if(url === '/api/files/upload') { const path='/files/'+body.name; archiveFiles.set(path,Buffer.from(body.data,'base64').toString('utf8')); return {ok:true,json:async()=>({path})}; }
+            if(url === '/api/files/upload') { const path='/user/files/'+body.name; archiveFiles.set(path,Buffer.from(body.data,'base64').toString('utf8')); return {ok:true,json:async()=>({path})}; }
             if(url === '/api/chats/export') return {ok:true,json:async()=>({result:raw})};
             if (url === '/api/chats/search') {
                 const scope = body.group_id ? `group:${body.group_id}` : `char:${body.avatar_url}`;

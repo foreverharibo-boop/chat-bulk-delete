@@ -1,6 +1,7 @@
 // Server-backed copies. No chat is removed by this module.
 const STATE_FILE = 'cbd-v2-state.json';
-const STATE_URL = `/files/${STATE_FILE}`;
+// SillyTavern serves the current user's uploads at /user/files/.
+const STATE_URL = `/user/files/${STATE_FILE}`;
 export const scopeKey = t => JSON.stringify([t.kind, t.kind === 'group' ? String(t.id) : t.avatar]);
 export const lockKey = (t, name) => JSON.stringify([scopeKey(t), name]);
 export function uniqueId() {
@@ -35,7 +36,7 @@ export class ChatVault {
     }
     async read(path, missing = false) {
         // Only our own same-origin file namespace may be read.
-        if (!/^\/?files\/cbd-v2-[a-zA-Z0-9_-]+\.json$/.test(path)) throw new Error('보관 파일 경로가 올바르지 않아.');
+        if (typeof path !== 'string' || !/^\/?user\/files\/cbd-v2-[a-zA-Z0-9_-]+\.json$/.test(path)) throw new Error('보관 파일 경로가 올바르지 않아.');
         const response = await this.fetcher('/' + path.replace(/^\//, ''), {
             cache: 'no-store', headers: this.getContext().getRequestHeaders(),
         });
@@ -55,7 +56,7 @@ export class ChatVault {
     async upload(name, text) {
         const response = await this.post('/api/files/upload', { name, data: base64(text) });
         const result = await response.json();
-        if (result.path?.replace(/^\//, '') !== `files/${name}`) throw new Error('보관 파일 저장 경로를 확인할 수 없어.');
+        if (typeof result.path !== 'string' || result.path.replace(/^\//, '') !== `user/files/${name}`) throw new Error('보관 파일 저장 경로를 확인할 수 없어.');
         const saved = await this.read(result.path);
         if (saved !== text) throw new Error('보관 파일 검증에 실패했어. 원본을 삭제하지 않을게.');
         return result.path;

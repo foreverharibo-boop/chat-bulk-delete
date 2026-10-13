@@ -26,8 +26,8 @@ function setup() {
         calls.push({url,body});
         if (failure && (url === failure || (failure === 'manifest' && body.name === 'cbd-v2-state.json'))) throw new Error('simulated offline');
         if(url === '/api/files/upload') {
-            files.set('/files/'+body.name,Buffer.from(body.data,'base64').toString('utf8'));
-            return {json:async()=>({path:'/files/'+body.name})};
+            files.set('/user/files/'+body.name,Buffer.from(body.data,'base64').toString('utf8'));
+            return {json:async()=>({path:'/user/files/'+body.name})};
         }
         if(url === '/api/chats/export') {
             const scope=body.is_group ? scopeKey(group) : scopeKey({kind:'character',avatar:body.avatar_url});
@@ -47,6 +47,35 @@ function setup() {
     const options={post,getContext:()=>ctx,fetcher};
     return {vault:new ChatVault(options),options,files,chats,calls,ctx,fail:value=>{failure=value;},corrupt:()=>{corrupt=true;}};
 }
+// Match the official /api/files/upload response and /user/files/* download route.
+for (const prefix of ['/user/files/', 'user/files/']) {
+    const f = setup();
+    const post = async (url, body) => {
+        const response = await f.options.post(url, body);
+        return url === '/api/files/upload' ? {json:async()=>({path:prefix + body.name})} : response;
+    };
+    const vault = new ChatVault({...f.options, post});
+    await vault.setLock(t, '다른 방', true);
+    const entry = await vault.archive(t, '현재');
+    const reloaded = new ChatVault({...f.options, post});
+    await reloaded.load();
+    assert.ok(reloaded.isLocked(t, '다른 방'));
+    assert.equal(reloaded.state.entries[0].id, entry.id);
+    assert.equal((await reloaded.readEntry(entry)).raw, raw);
+    await reloaded.restore(entry);
+    assert.equal(f.chats.get(scopeKey(t) + '|현재'), raw);
+}
+for (const path of ['/files/cbd-v2-check.json', '//evil.test/user/files/cbd-v2-check.json',
+    'https://evil.test/user/files/cbd-v2-check.json', '/user/files/../cbd-v2-check.json',
+    '/user/files/cbd-v2-check.json?x=1', '/user/files/other.json', null, {}]) {
+    let reads = 0;
+    const vault = new ChatVault({getContext:()=>({getRequestHeaders:()=>({})}),
+        fetcher:async()=>{reads++; throw Error('must not read');}, post:async()=>({json:async()=>({path})})});
+    await assert.rejects(vault.upload('cbd-v2-check.json', 'archive'), /저장 경로/);
+    await assert.rejects(vault.read(path), /경로/);
+    assert.equal(reads, 0);
+}
+console.log('PASS: official upload paths, server reload, locks, archive readback and restore; invalid paths rejected before fetch');
 // Browser fetch requires Window as its receiver; arrow-only mocks hide this bug.
 {
     const f = setup();
@@ -67,7 +96,7 @@ function setup() {
         const entry = await vault.archive(t, '현재');
         assert.equal((await vault.readEntry(entry)).raw, raw);
         await vault.restore(entry);
-        assert.ok(reads.includes('/files/cbd-v2-state.json'));
+        assert.ok(reads.includes('/user/files/cbd-v2-state.json'));
         assert.ok(reads.includes(entry.path));
         assert.equal(f.chats.get(scopeKey(t) + '|현재'), raw);
         assert.equal(f.chats.get(scopeKey(other) + '|현재'), raw);
@@ -88,7 +117,7 @@ console.log('PASS: locks persist on server, follow renamed chats, and are scoped
 f=setup();
 const entry=await f.vault.archive(t,'현재');
 assert.equal((await f.vault.readEntry(entry)).raw,raw);
-assert.ok(f.files.has('/files/cbd-v2-state.json'));
+assert.ok(f.files.has('/user/files/cbd-v2-state.json'));
 const beforeOther=f.chats.get(scopeKey(other)+'|현재');
 await f.vault.mark(entry.id,'trashed');
 const name=await f.vault.restore(entry);
