@@ -33,6 +33,7 @@
 #select_chat_div .cbd-lock { flex:0 0 30px; align-self:center; display:flex; align-items:center; justify-content:center; min-height:34px; width:30px; margin:0; padding:3px; border:1px solid var(--SmartThemeBorderColor); border-radius:6px; background:var(--SmartThemeBlurTintColor); color:var(--SmartThemeBodyColor); cursor:pointer; }
 #select_chat_div .cbd-locked .PastChat_cross { opacity:.35; }
 .cbd-trash { text-align:left; max-height:70vh; overflow:auto; }
+.cbd-trash > button.cbd-button[data-cbd-action="empty-trash"] { display:inline-flex; align-items:center; justify-content:center; align-self:flex-start; flex:0 0 auto; width:max-content; min-width:max-content; height:auto; margin:0; padding:4px 8px; white-space:nowrap; word-break:normal; writing-mode:horizontal-tb; }
 .cbd-trash [role="status"] { white-space:pre-wrap; overflow-wrap:anywhere; }
 .cbd-trash-row { padding:10px 0; border-top:1px solid var(--SmartThemeBorderColor); }
 .cbd-trash-row p { white-space:pre-wrap; overflow-wrap:anywhere; margin:0 0 6px; }
