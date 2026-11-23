@@ -3,7 +3,7 @@ import { getContext } from '../../../extensions.js';
 import * as Group from '../../../group-chats.js';
 import { callGenericPopup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { deleteSelected } from './batch.js';
-import { scopeKey, parseChat, exportChat } from './chat-data.js';
+import { scopeKey, parseChat, exportChat, cleanupLegacyTrash } from './chat-data.js';
 import * as STLib from '../../../../lib.js';
 import { findDuplicateChats } from './duplicates.js';
 
@@ -20,6 +20,7 @@ let statusText = '';
 let duplicateScope = null;
 let duplicateGroups = new Map();
 let duplicateRevision = 0;
+let legacyCleanupStarted = false;
 function clearDuplicates() {
     const hadResults = duplicateScope !== null;
     duplicateRevision++;
@@ -413,6 +414,14 @@ function onKey(event) {
     }
 }
 function initialize() {
+    if (!legacyCleanupStarted) {
+        legacyCleanupStarted = true;
+        void cleanupLegacyTrash({ fetcher: (...args) => fetch(...args), headers: () => getContext().getRequestHeaders(), post })
+            .then(result => {
+                if (result.cleaned) notice('success', `예전 휴지통 보관본 ${result.deleted}개와 목록을 정리했어.`);
+            })
+            .catch(error => notice('warning', `예전 휴지통 정리를 마치지 못했어. 새로고침하면 다시 시도할게. ${error.message}`));
+    }
     popup = document.getElementById('select_chat_popup');
     list = document.getElementById('select_chat_div');
     if (!popup || !list || document.getElementById('cbd-toolbar')) return;

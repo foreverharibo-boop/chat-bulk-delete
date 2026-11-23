@@ -1,4 +1,4 @@
-# 채팅방 일괄 삭제 v3.0.0
+# 채팅방 일괄 삭제 v3.0.1
 
 실리태번 채팅 기록에서 여러 방을 선택해 삭제하고, 내용이 같은 채팅을 확인하는 간단한 확장입니다.
 
@@ -37,15 +37,21 @@
 남긴 기능: 선택·전체 선택/해제, 삭제 확인·일괄 삭제, 중복 확인·표시, 작업 중 진행 상황·중단.
 
 휴지통·복원, 채팅 잠금, ZIP 백업, 추가 정렬·필터를 제거했습니다. 기존 잠금은 더 이상 삭제를 막지 않습니다.
-예전에 서버 `user/files/`에 저장한 `cbd-v2-state.json`과 `cbd-v2-trash-*.json`은 삭제하거나 변경하지 않습니다. 새 버전에는 이 보관본을 여는 화면이 없습니다. 기존 휴지통에서 복원할 것이 있다면 업데이트 전에 v2.2.1에서 복원해 주세요. 이미 업데이트했다면 v2.2.1 소스로 되돌려 기존 보관본에 접근할 수 있습니다.
+
+## v3.0.1 변경
+
+업데이트 후 새로고침하여 확장이 실행되면, 예전 휴지통 목록에 등록된 보관본과 `cbd-v2-state.json`(목록·잠금 정보)을 자동으로 영구 삭제합니다. 별도 확인창은 없으며 복원할 수 없습니다. 실제 채팅 파일과 다른 확장의 파일은 정리 대상이 아닙니다.
+
+보관본의 파일명·ID·원래 채팅 정보를 확인한 뒤 삭제하고, 모든 보관본 정리가 끝나면 목록을 마지막으로 삭제합니다. 실패하면 목록을 남기고 알림을 표시하며 다음 새로고침 때 다시 시도합니다. 목록이 없거나 손상되어 보관본을 확인할 수 없는 경우 파일을 추측해 지우지 않습니다. 목록에 등록되지 않은 고립 파일은 이 정리에 포함되지 않습니다.
+
 
 ## 검증
 
 ```sh
-node --test tests/batch.test.mjs tests/integration.test.cjs tests/delete-scope.test.cjs tests/checkbox.test.cjs tests/safety-regressions.test.cjs tests/duplicates.test.mjs
+node --test tests/batch.test.mjs tests/integration.test.cjs tests/delete-scope.test.cjs tests/checkbox.test.cjs tests/safety-regressions.test.cjs tests/duplicates.test.mjs tests/legacy-cleanup.test.mjs
 ```
 
-모의 채팅 데이터로 캐릭터/그룹별 선택 범위, 확인 취소, 현재 대화 변경·생성 중 중단, 중복 검사, 기존 보관 데이터 보존을 검증합니다. 실제 사용자 채팅을 삭제하는 검사는 하지 않습니다.
+모의 채팅 데이터로 캐릭터/그룹별 선택 범위, 확인 취소, 현재 대화 변경·생성 중 중단, 중복 검사, 이전 휴지통 자동 정리·실패 후 재시도·다른 파일 보존을 검증합니다. 실제 사용자 채팅을 삭제하는 검사는 하지 않습니다.
 
 ## 라이센스 · 원작자 표시와 공개 포크 부탁
 
