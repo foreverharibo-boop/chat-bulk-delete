@@ -1,8 +1,8 @@
 const vm = require('vm');
 const fs = require('fs');
 const assert = require('assert/strict');
-const vaultSource = fs.readFileSync(fs.existsSync('vault.js') ? 'vault.js' : 'chat-bulk-delete/vault.js','utf8').replace(/^export /gm,'');
-const src = vaultSource+'\n'+fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js','utf8').replace(/^import .*;\n/gm,'');
+const chatSource = fs.readFileSync(fs.existsSync('chat-data.js') ? 'chat-data.js' : 'chat-bulk-delete/chat-data.js','utf8').replace(/^export /gm,'');
+const src = chatSource+'\n'+fs.readFileSync(fs.existsSync('index.js') ? 'index.js' : 'chat-bulk-delete/index.js','utf8').replace(/^import .*;\n/gm,'');
 function setup(groupMode=false) {
  const archiveFiles=new Map(); const raw=JSON.stringify({chat_metadata:{}})+'\n'+JSON.stringify({mes:'kept'});
  const disk=new Set(['active','a','b']); const requests=[]; const events=[];

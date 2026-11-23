@@ -52,47 +52,6 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
         assert.equal(f.calls.length, 0);
         assert.ok(f.stores['group:g1'].has(chosen));
     });
-    for (const failure of ['archive-upload', 'index-upload', 'archive-path', 'archive-read', 'source-change']) {
-        await check(`${failure} prevents every destructive request`, async () => {
-            const f = fixtures.makeFixture(false);
-            const fetch = f.runtime.fetch;
-            let exports = 0;
-            f.runtime.fetch = async (url, options) => {
-                const body = options?.body ? JSON.parse(options.body) : {};
-                if (url === '/api/files/upload' && ((failure === 'archive-upload' && body.name.includes('trash-'))
-                    || (failure === 'index-upload' && body.name === 'cbd-v2-state.json'))) throw new Error('offline');
-                const response = await fetch(url, options);
-                if (failure === 'archive-path' && url === '/api/files/upload') response.json = async () => ({path:'/user/files/cbd-v2-wrong.json'});
-                if (failure === 'archive-read' && url.startsWith('/user/files/cbd-v2-trash-')) response.text = async () => 'truncated';
-                if (url === '/api/chats/export') {
-                    exports++;
-                    if (failure === 'source-change' && exports > 1) response.json = async () => ({result:'changed'});
-                }
-                return response;
-            };
-            const report = await deleteSelected(['전여친1'], f.runtime.scopeTarget(), f.runtime.scopeApi, () => {}, () => false);
-            assert.equal(report.failed.length, 1);
-            assert.equal(f.calls.length, 0);
-            assert.ok(f.stores['char:current.png'].has('전여친1'));
-        });
-    }
-    await check('context change during archive upload prevents deletion', async () => {
-        const f = fixtures.makeFixture(false), fetch = f.runtime.fetch;
-        f.runtime.fetch = async (url, options) => {
-            const response = await fetch(url, options);
-            if (url === '/api/files/upload') f.ctx.characterId = 1;
-            return response;
-        };
-        const report = await deleteSelected(['전여친1'], f.runtime.scopeTarget(), f.runtime.scopeApi, () => {}, () => false);
-        assert.equal(report.failed.length, 1); assert.equal(f.calls.length, 0);
-    });
-    await check('server-persisted lock prevents deletion after reload', async () => {
-        const f = fixtures.makeFixture(false), t = f.runtime.scopeTarget();
-        const vault = vm.runInContext('getVault()', f.runtime);
-        await vault.setLock(t, '전여친1', true);
-        const report = await deleteSelected(['전여친1'], t, f.runtime.scopeApi, () => {}, () => false);
-        assert.equal(report.failed.length, 1); assert.equal(f.calls.length, 0);
-    });
     await check('duplicate scan only reads current-scope chats; never saves, archives, selects or deletes', async () => {
         const f = fixtures.makeFixture(false);
         let saves = 0;
@@ -106,24 +65,36 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
         assert.equal(vm.runInContext('duplicateGroups.size', f.runtime), 4);
         assert.equal(vm.runInContext('selected.size', f.runtime), 0);
     });
-    await check('permanent deletion checks locks, shared group files and changing scope without archiving', async () => {
-        let f = fixtures.makeFixture(false);
-        await vm.runInContext('getVault()', f.runtime).setLock(f.runtime.scopeTarget(), '전여친1', true);
-        await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), '전여친1', {permanent:true}));
-        assert.equal(f.calls.length,0);
-        f = fixtures.makeFixture(true);
-        f.ctx.groups[1].chats.push(f.currentNames[1]);
-        await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), f.currentNames[1], {permanent:true}));
-        assert.equal(f.calls.length,0); assert.equal(f.archiveFiles.size,0);
-        f = fixtures.makeFixture(false);
-        const fetch = f.runtime.fetch;
-        f.runtime.fetch = async (url,options) => {
-            const response = await fetch(url,options);
-            if(url.endsWith('cbd-v2-state.json')) f.ctx.characterId=1;
-            return response;
+    await check('active chat export failure or state change prevents deletion', async () => {
+        for (const scenario of ['read-failure','changed-content','scope-change','generation','stop']) {
+            const f = fixtures.makeFixture(false), fetch = f.runtime.fetch;
+            f.runtime.fetch = async (url,options) => {
+                if (url === '/api/chats/export' && scenario === 'read-failure') throw Error('offline');
+                const response = await fetch(url,options);
+                if(url === '/api/chats/export') {
+                    if(scenario === 'changed-content') response.json=async()=>({result:JSON.stringify({mes:'different'})});
+                    if(scenario === 'scope-change') f.ctx.characterId=1;
+                    if(scenario === 'generation') f.runtime.ST.isGenerating=()=>true;
+                    if(scenario === 'stop') vm.runInContext('stopRequested=true',f.runtime);
+                }
+                return response;
+            };
+            await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), f.ctx.chatId));
+            assert.equal(f.calls.length,0);
+        }
+    });
+    await check('legacy trash and lock files are untouched and not loaded by deletion or duplicate scans', async () => {
+        const f = fixtures.makeFixture(false);
+        f.archiveFiles.set('/user/files/cbd-v2-state.json', '{"locks":{"old":"locked"}}');
+        f.archiveFiles.set('/user/files/cbd-v2-trash-old.json', 'saved conversation');
+        const before=[...f.archiveFiles],fetch=f.runtime.fetch;
+        f.runtime.fetch=async(url,options)=>{
+            assert.ok(!url.startsWith('/user/files/')&&!url.startsWith('/api/files/'));
+            return fetch(url,options);
         };
-        await assert.rejects(f.runtime.scopeApi.remove(f.runtime.scopeTarget(), '전여친1', {permanent:true}));
-        assert.equal(f.calls.length,0); assert.equal(f.archiveFiles.size,0);
+        await vm.runInContext('runDuplicateScan()',f.runtime);
+        await deleteSelected(['전여친1'],f.runtime.scopeTarget(),f.runtime.scopeApi,()=>{},()=>false);
+        assert.equal(f.calls.length,1);assert.deepEqual([...f.archiveFiles],before);
     });
     await check('permanent confirmation cancels without deletion; confirmed operation skips trash; changed selection aborts', async () => {
         for (const scenario of ['cancel','confirm','selection-change','scope-change']) {
@@ -140,45 +111,9 @@ vm.runInContext(fixtureCode + '\nglobalThis.makeFixture = fixture;', fixtures);
                 return scenario==='cancel'?0:1;
             };
             vm.runInContext("render=()=>{};target=captureTarget();selected.add('전여친1');toolbar={querySelector:()=>({focus(){}})};list={querySelectorAll:()=>[{querySelector:()=>({getAttribute:()=> '전여친1'})}]};",f.runtime);
-            await vm.runInContext('runDelete(true)',f.runtime);
+            await vm.runInContext('runDelete()',f.runtime);
             assert.equal(f.calls.length,scenario==='confirm'?1:0);
             assert.equal(f.archiveFiles.size,0);
-        }
-    });
-    await check('trash empty confirmation captures only displayed scope; cancel, new entries and scope changes are respected', async () => {
-        for (const scenario of ['cancel','confirm','scope-change']) {
-            const f = fixtures.makeFixture(false), t = f.runtime.scopeTarget();
-            const entries = [
-                {id:'a'.repeat(32),name:'현재 캐릭터 보관본',target:t,created:1,status:'trashed'},
-                {id:'b'.repeat(32),name:'다른 캐릭터 보관본',target:{kind:'character',avatar:'other.png'},created:2,status:'trashed'},
-            ];
-            const purged = []; let dialog;
-            f.runtime.trashVault = {state:{entries},load:async()=>{},purgeEntry:async(scope,entry,guard)=>{
-                guard(); assert.equal(scope.avatar,'current.png'); purged.push(entry.id);
-                f.runtime.trashVault.state.entries=f.runtime.trashVault.state.entries.filter(x=>x.id!==entry.id);
-            }};
-            f.runtime.document.createElement = tag => ({tag,children:[],dataset:{},handlers:{},
-                setAttribute(){},append(...children){for(const child of children){child.parent=this;this.children.push(child);}},
-                addEventListener(event,handler){this.handlers[event]=handler;},
-                remove(){this.parent.children=this.parent.children.filter(x=>x!==this);},
-                querySelector(selector){const id=selector.match(/data-cbd-trash-id="([^"]+)"/)?.[1];return this.children.find(x=>x.dataset?.cbdTrashId===id);}});
-            f.runtime.POPUP_TYPE={TEXT:2,CONFIRM:1};f.runtime.POPUP_RESULT={AFFIRMATIVE:1};
-            f.runtime.callGenericPopup=async(content,type)=>{
-                if(type===2){dialog=content;return 0;}
-                assert.deepEqual(content.children[1].children.map(x=>x.textContent),['현재 캐릭터 보관본']);
-                if(scenario==='scope-change')f.ctx.characterId=1;
-                return scenario==='cancel'?0:1;
-            };
-            vm.runInContext('vault=trashVault;render=()=>{};',f.runtime);
-            await vm.runInContext('showTrash()',f.runtime);
-            // Entries added after opening are outside the user's captured confirmation.
-            f.runtime.trashVault.state.entries.push({id:'c'.repeat(32),name:'나중에 추가됨',target:t});
-            const empty=dialog.children.find(x=>x.dataset?.cbdAction==='empty-trash');
-            await empty.handlers.click();
-            assert.deepEqual(purged,scenario==='confirm'?['a'.repeat(32)]:[]);
-            assert.ok(f.runtime.trashVault.state.entries.some(x=>x.id==='b'.repeat(32)));
-            assert.ok(f.runtime.trashVault.state.entries.some(x=>x.id==='c'.repeat(32)));
-            assert.equal(f.calls.length,0);
         }
     });
     if (checks.length) process.exitCode = 1;
